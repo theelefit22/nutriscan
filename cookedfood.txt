@@ -1,0 +1,171 @@
+import requests
+
+# === CONFIGURATION ===
+API_KEY = "DEMO_KEY"  # Replace with your real api.data.gov key for unlimited use
+BASE_URL = "https://api.nal.usda.gov/fdc/v1"
+
+def search_foods(query):
+    url = f"{BASE_URL}/foods/search"
+    params = {
+        "query": query,
+        "dataType": ["Foundation", "SR Legacy", "Branded", "Survey (FNDDS)"],
+        "pageSize": 20,  # More results for varieties
+        "sortBy": "lowercaseDescription.keyword",
+        "sortOrder": "asc",
+        "api_key": API_KEY
+    }
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        print("API Error:", response.status_code, response.text)
+        return None
+    return response.json()
+
+def get_food_details(fdc_id):
+    url = f"{BASE_URL}/food/{fdc_id}"
+    params = {"api_key": API_KEY}
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        print("Error fetching details:", response.text)
+        return None
+    return response.json()
+
+def clean_food_name(food):
+    """Return a clean, user-friendly food name focused on varieties"""
+    desc = food.get("description", "Unknown Food").strip()
+    
+    # Remove common unwanted prefixes
+    prefixes_to_remove = [
+        "Bread, ", "Indian flatbread, ", "Naan, ", "NAAN, ", "Restaurant, ", 
+        "Fast foods, ", "Indian, ", "Flatbread, "
+    ]
+    for prefix in prefixes_to_remove:
+        if desc.lower().startswith(prefix.lower()):
+            desc = desc[len(prefix):].strip()
+    
+    # Remove trailing commas or extra info
+    if desc.endswith(", plain"):
+        desc = desc[:-7].strip()
+    
+    # Capitalize properly
+    desc = desc.capitalize()
+    
+    # Special handling for common varieties
+    if "garlic" in desc.lower():
+        desc = "Garlic " + desc.lower().replace("garlic", "").strip()
+    if "butter" in desc.lower() and "garlic" not in desc.lower():
+        desc = "Butter " + desc.lower().replace("butter", "").strip()
+    if "cheese" in desc.lower():
+        desc = "Cheese " + desc.lower().replace("cheese", "").strip()
+    if "whole wheat" in desc.lower():
+        desc = "Whole wheat " + desc.lower().replace("whole wheat", "").strip()
+    
+    # Default to adding "Naan" if it seems like a naan variant
+    if query.lower() in ["naan", "nan"] and not desc.lower().startswith(("plain", "garlic", "butter", "cheese", "whole")):
+        desc = "Plain " + desc
+    
+    return desc.strip().capitalize()
+
+def extract_nutrients(food_data, weight_grams):
+    nutrients = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+    
+    for nutrient in food_data.get("foodNutrients", []):
+        name = nutrient["nutrient"]["name"]
+        amount = nutrient.get("amount", 0) or 0
+        unit = nutrient["nutrient"]["unitName"].upper()
+
+        if name == "Energy" and unit == "KCAL":
+            nutrients["calories"] = amount
+        elif name == "Protein":
+            nutrients["protein"] = amount
+        elif name == "Total lipid (fat)":
+            nutrients["fat"] = amount
+        elif name == "Carbohydrate, by difference":
+            nutrients["carbs"] = amount
+
+    # Scale to entered weight (USDA usually per 100g)
+    scale_factor = weight_grams / 100.0
+    for key in ["calories", "protein", "fat", "carbs"]:
+        nutrients[key] *= scale_factor
+
+    # Macro percentages
+    total_cal = nutrients["calories"]
+    if total_cal > 0:
+        nutrients["fat_percent"] = (nutrients["fat"] * 9 / total_cal) * 100
+        nutrients["protein_percent"] = (nutrients["protein"] * 4 / total_cal) * 100
+        nutrients["carbs_percent"] = (nutrients["carbs"] * 4 / total_cal) * 100
+    else:
+        nutrients["fat_percent"] = nutrients["protein_percent"] = nutrients["carbs_percent"] = 0
+
+    return nutrients
+
+def main():
+    global query  # For use in clean_food_name
+    print("🍛 Food Nutrition Calculator - Better Variety Support!\n")
+    
+    query = input("Enter food name (e.g., naan, french fries, chicken curry): ").strip()
+    if not query:
+        print("Please enter something!")
+        return
+
+    print("\nSearching USDA database for similar items and varieties...")
+    data = search_foods(query)
+    if not data or "foods" not in data or len(data["foods"]) == 0:
+        print("❌ No matching foods found. Try a broader term or spelling variation.")
+        return
+
+    foods = data["foods"]
+    unique_names = set()  # Avoid duplicates
+    displayed_foods = []
+    
+    for food in foods:
+        clean_name = clean_food_name(food)
+        if clean_name not in unique_names:
+            unique_names.add(clean_name)
+            displayed_foods.append((clean_name, food))
+
+    if len(displayed_foods) == 0:
+        print("No unique items found.")
+        return
+
+    print(f"\nFound {len(displayed_foods)} similar/variety items:\n")
+    for i, (clean_name, _) in enumerate(displayed_foods, 1):
+        print(f"{i}. {clean_name}")
+
+    try:
+        choice = int(input(f"\nSelect the food/variety (1-{len(displayed_foods)}): ")) - 1
+        if choice < 0 or choice >= len(displayed_foods):
+            print("Invalid number.")
+            return
+    except ValueError:
+        print("Please enter a valid number.")
+        return
+
+    selected_name, selected_food = displayed_foods[choice]
+    fdc_id = selected_food["fdcId"]
+
+    print(f"\nFetching nutrition data for: {selected_name}")
+    details = get_food_details(fdc_id)
+    if not details:
+        return
+
+    try:
+        weight = float(input(f"\nEnter weight in grams (from your scale): "))
+        if weight <= 0:
+            print("Weight must be positive.")
+            return
+    except ValueError:
+        print("Invalid weight.")
+        return
+
+    nutrients = extract_nutrients(details, weight)
+
+    print(f"\n📊 Nutrition for {weight}g of {selected_name}:\n")
+    print(f"Calories      : {nutrients['calories']:.1f} kcal")
+    print(f"Protein       : {nutrients['protein']:.1f} g   ({nutrients['protein_percent']:.1f}% of calories)")
+    print(f"Fat           : {nutrients['fat']:.1f} g       ({nutrients['fat_percent']:.1f}% of calories)")
+    print(f"Carbohydrates : {nutrients['carbs']:.1f} g   ({nutrients['carbs_percent']:.1f}% of calories)")
+
+    print("\nEnjoy your meal! 🍽️")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NutriScan - Advanced Nutrition Analysis</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-leaf"></i>
+                <span>NutriScan</span>
+            </div>
+            <p class="subtitle">Discover what's in your food with precision.</p>
+        </header>
+
+        <section class="search-section">
+            <div class="search-box">
+                <i class="fa-solid fa-search search-icon"></i>
+                <input type="text" id="foodInput"
+                    placeholder="Search for food (e.g., 'avocado toast', 'butter chicken')...">
+                <button id="searchBtn" class="primary-btn">Analyze</button>
+            </div>
+        </section>
+
+        <section id="resultsSection" class="results-section hidden">
+            <h3>Search Results</h3>
+            <div class="results-grid" id="resultsList">
+                <!-- Results will be injected here -->
+            </div>
+        </section>
+
+        <div id="modalOverlay" class="modal-overlay hidden">
+            <div class="modal">
+                <button class="close-modal" id="closeModal"><i class="fa-solid fa-times"></i></button>
+
+                <div class="modal-content" id="modalContent">
+                    <!-- Dynamic Content -->
+                    <div class="food-header">
+                        <h2 id="modalFoodName">Loading...</h2>
+                        <span class="badge" id="modalBrand">Generic</span>
+                    </div>
+
+                    <div class="weight-input-container">
+                        <label for="weightInput">Weight (grams)</label>
+                        <div class="input-group">
+                            <input type="number" id="weightInput" value="100" min="1">
+                            <button id="calculateBtn" class="secondary-btn">Calculated</button>
+                        </div>
+                    </div>
+
+                    <div id="nutritionResults" class="nutrition-results hidden">
+                        <div class="macro-cards">
+                            <div class="card calorie-card">
+                                <div class="icon"><i class="fa-solid fa-fire"></i></div>
+                                <div class="value" id="valCalories">0</div>
+                                <div class="label">Calories</div>
+                            </div>
+                            <div class="card protein-card">
+                                <div class="icon"><i class="fa-solid fa-dumbbell"></i></div>
+                                <div class="value" id="valProtein">0g</div>
+                                <div class="label">Protein</div>
+                                <div class="percent" id="pctProtein">0%</div>
+                            </div>
+                            <div class="card carbs-card">
+                                <div class="icon"><i class="fa-solid fa-bread-slice"></i></div>
+                                <div class="value" id="valCarbs">0g</div>
+                                <div class="label">Carbs</div>
+                                <div class="percent" id="pctCarbs">0%</div>
+                            </div>
+                            <div class="card fat-card">
+                                <div class="icon"><i class="fa-solid fa-cheese"></i></div>
+                                <div class="value" id="valFat">0g</div>
+                                <div class="label">Fat</div>
+                                <div class="percent" id="pctFat">0%</div>
+                            </div>
+                        </div>
+
+                        <div class="chart-container">
+                            <!-- Simple bar representation for visual balance -->
+                            <div class="macro-bar">
+                                <div class="bar-segment protein-seg" id="barProtein" style="width: 33%"></div>
+                                <div class="bar-segment carbs-seg" id="barCarbs" style="width: 33%"></div>
+                                <div class="bar-segment fat-seg" id="barFat" style="width: 33%"></div>
+                            </div>
+                            <div class="macro-legend">
+                                <span><span class="dot p-dot"></span>Protein</span>
+                                <span><span class="dot c-dot"></span>Carbs</span>
+                                <span><span class="dot f-dot"></span>Fat</span>
+                            </div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <div class="detailed-list" id="detailedList">
+                            <!-- Injected via JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
