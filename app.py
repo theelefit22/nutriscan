@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 import food_nutrition_clean as backend
+import indb_data
 
 app = Flask(__name__)
 
@@ -13,35 +14,45 @@ def search():
     if not query:
         return jsonify({'error': 'Query parameter is required'}), 400
     
-    data = backend.search_foods(query)
-    if not data or 'foods' not in data:
-        return jsonify({'foods': []})
+    # Determine search strategy based on query
+    is_indian = indb_data.is_indian_query(query)
     
-    # Process foods to add a clean name for display
-    foods = data.get('foods', [])
-    results = []
+    all_results = []
     seen_names = set()
     
-    for food in foods:
-        clean_name = backend.clean_food_name(food)
-        
-        # Normalize for deduplication (case-insensitive)
-        norm_name = clean_name.lower().strip()
-        
-        # Skip if we already have this variety
-        if norm_name in seen_names:
-            continue
+    # Priority 1: If Indian query, search INDB first
+    if is_indian:
+        indb_results = indb_data.search_indb(query, max_results=10)
+        for food in indb_results:
+            clean_name = food['description'].lower().strip()
+            if clean_name not in seen_names:
+                seen_names.add(clean_name)
+                all_results.append(food)
+    
+    # Priority 2: Search USDA
+    usda_data = backend.search_foods(query)
+    if usda_data and 'foods' in usda_data:
+        for food in usda_data.get('foods', []):
+            clean_name = backend.clean_food_name(food).lower().strip()
             
-        seen_names.add(norm_name)
-        
-        results.append({
-            'fdcId': food.get('fdcId'),
-            'description': clean_name,
-            'original_description': food.get('description'),
-            'brandOwner': food.get('brandOwner', '') # Should be empty or filtered out mostly
-        })
-        
-    return jsonify({'foods': results})
+            # Skip if already have this from INDB
+            if clean_name in seen_names:
+                continue
+            
+            seen_names.add(clean_name)
+            all_results.append({
+                'fdcId': food.get('fdcId'),
+                'description': backend.clean_food_name(food),
+                'source': 'USDA',
+                'dataType': food.get('dataType', ''),
+                'brandOwner': food.get('brandOwner', '')
+            })
+    
+    # If Indian query but no INDB results, still show USDA results
+    # Limit total results
+    all_results = all_results[:15]
+    
+    return jsonify({'foods': all_results})
 
 # Nutrient mapping dictionary
 NUTRIENT_MAP = {
@@ -136,17 +147,41 @@ def calculate():
     except ValueError:
         return jsonify({'error': 'Weight must be a number'}), 400
 
-    details = backend.get_food_details(fdc_id)
-    if not details:
-        return jsonify({'error': 'Food details not found'}), 404
+    # Check if this is an INDB food code (starts with ASC, BFP, or OSR)
+    fdc_id_str = str(fdc_id)
+    if fdc_id_str.startswith(('ASC', 'BFP', 'OSR')):
+        # Use INDB data
+        nutrients = indb_data.get_indb_nutrients(fdc_id_str, weight)
+        if not nutrients:
+            return jsonify({'error': 'INDB recipe not found'}), 404
+        
+        # Get food name from INDB data
+        food_name = "Unknown"
+        for recipe in indb_data.INDB_DATA:
+            if recipe['food_code'] == fdc_id_str:
+                food_name = recipe['food_name']
+                break
+        
+        return jsonify({
+            'food_name': food_name,
+            'weight': weight,
+            'nutrients': nutrients,
+            'source': 'INDB'
+        })
+    else:
+        # Use USDA data
+        details = backend.get_food_details(fdc_id)
+        if not details:
+            return jsonify({'error': 'Food details not found'}), 404
 
-    nutrients = extract_detailed_nutrients(details, weight)
-    
-    return jsonify({
-        'food_name': details.get('description'), 
-        'weight': weight,
-        'nutrients': nutrients
-    })
+        nutrients = extract_detailed_nutrients(details, weight)
+        
+        return jsonify({
+            'food_name': details.get('description'), 
+            'weight': weight,
+            'nutrients': nutrients,
+            'source': 'USDA'
+        })
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
