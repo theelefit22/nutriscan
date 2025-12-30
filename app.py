@@ -14,45 +14,59 @@ def search():
     if not query:
         return jsonify({'error': 'Query parameter is required'}), 400
     
-    # Determine search strategy based on query
-    is_indian = indb_data.is_indian_query(query)
-    
+    query_lower = query.lower().strip()
     all_results = []
     seen_names = set()
     
-    # Priority 1: If Indian query, search INDB first
-    if is_indian:
-        indb_results = indb_data.search_indb(query, max_results=10)
-        for food in indb_results:
-            clean_name = food['description'].lower().strip()
-            if clean_name not in seen_names:
-                seen_names.add(clean_name)
-                all_results.append(food)
+    # 1. Search INDB
+    indb_results = indb_data.search_indb(query, max_results=15)
+    for food in indb_results:
+        clean_name = food['description'].lower().strip()
+        if clean_name not in seen_names:
+            seen_names.add(clean_name)
+            all_results.append(food)
     
-    # Priority 2: Search USDA
+    # 2. Search USDA
     usda_data = backend.search_foods(query)
     if usda_data and 'foods' in usda_data:
+        from rapidfuzz import fuzz
         for food in usda_data.get('foods', []):
-            clean_name = backend.clean_food_name(food).lower().strip()
+            original_desc = food.get('description', '')
+            clean_name_val = backend.clean_food_name(food)
+            clean_name_lower = clean_name_val.lower().strip()
             
-            # Skip if already have this from INDB
-            if clean_name in seen_names:
+            if clean_name_lower in seen_names:
                 continue
-            
-            seen_names.add(clean_name)
+                
+            # Score USDA results
+            score = 0
+            if query_lower in clean_name_lower:
+                score = 90 # Slightly lower than INDB substring match
+                if clean_name_lower.startswith(query_lower):
+                    score += 10
+                if clean_name_lower == query_lower:
+                    score += 40
+            else:
+                fuzzy_score = fuzz.token_sort_ratio(query_lower, clean_name_lower)
+                if fuzzy_score < 60:
+                    continue
+                score = fuzzy_score
+
+            seen_names.add(clean_name_lower)
             all_results.append({
                 'fdcId': food.get('fdcId'),
-                'description': backend.clean_food_name(food),
+                'description': clean_name_val,
                 'source': 'USDA',
                 'dataType': food.get('dataType', ''),
-                'brandOwner': food.get('brandOwner', '')
+                'brandOwner': food.get('brandOwner', ''),
+                'score': score
             })
     
-    # If Indian query but no INDB results, still show USDA results
-    # Limit total results
-    all_results = all_results[:15]
+    # Sort all results by score
+    all_results.sort(key=lambda x: x.get('score', 0), reverse=True)
     
-    return jsonify({'foods': all_results})
+    # Limit total results
+    return jsonify({'foods': all_results[:15]})
 
 # Nutrient mapping dictionary
 NUTRIENT_MAP = {

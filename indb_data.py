@@ -19,42 +19,103 @@ except Exception as e:
     print(f"Error loading INDB data: {e}")
 
 
+from rapidfuzz import process, fuzz
+import re
+
+def split_query(query):
+    """
+    Attempts to split a no-space query into two words if they exist in a dictionary.
+    Since we don't have a full dictionary, we'll use words from INDB_DATA.
+    """
+    if ' ' in query:
+        return [query]
+    
+    # Extract all unique words from INDB food names
+    all_words = set()
+    for recipe in INDB_DATA:
+        words = re.findall(r'\w+', recipe.get('food_name', '').lower())
+        all_words.update(words)
+    
+    # Try to split into two parts
+    for i in range(3, len(query) - 2):
+        left = query[:i]
+        right = query[i:]
+        if left in all_words and right in all_words:
+            return [f"{left} {right}"]
+    
+    return [query]
+
 def search_indb(query, max_results=15):
     """
-    Search INDB for recipes matching the query
+    Search INDB for recipes matching the query with scoring and fuzzy matching
     
     Args:
         query: Search term
         max_results: Maximum number of results to return
         
     Returns:
-        List of matching recipes
+        List of matching recipes with scores
     """
     if not INDB_DATA:
         return []
     
     query_lower = query.lower().strip()
-    results = []
     
-    for recipe in INDB_DATA:
-        food_name = recipe.get('food_name', '').lower()
-        
-        # Simple substring matching
-        if query_lower in food_name:
-            results.append({
-                'fdcId': recipe['food_code'],  # Use food_code as ID
+    # Try to handle no-space queries
+    queries_to_try = [query_lower]
+    if ' ' not in query_lower:
+        split_versions = split_query(query_lower)
+        for sv in split_versions:
+            if sv not in queries_to_try:
+                queries_to_try.append(sv)
+    
+    all_scored_results = []
+    seen_ids = set()
+    
+    for current_query in queries_to_try:
+        for recipe in INDB_DATA:
+            food_id = recipe['food_code']
+            if food_id in seen_ids:
+                continue
+                
+            food_name = recipe.get('food_name', '').lower()
+            
+            score = 0
+            # 1. Simple substring (high boost)
+            if current_query in food_name:
+                score = 100
+                if food_name.startswith(current_query):
+                    score += 20
+                if food_name == current_query:
+                    score += 50
+            else:
+                # 2. Fuzzy matching
+                # Partial ratio is better for finding "chicken" in "chicken soup"
+                # but token_sort_ratio handles word reordering. We'll use a combination or max.
+                s1 = fuzz.token_sort_ratio(current_query, food_name)
+                s2 = fuzz.partial_ratio(current_query, food_name)
+                fuzzy_score = max(s1, s2)
+                
+                if fuzzy_score < 70: # Increased threshold for better accuracy
+                    continue
+                score = fuzzy_score
+
+            all_scored_results.append({
+                'fdcId': food_id,
                 'description': recipe['food_name'],
                 'source': 'INDB',
                 'dataType': 'Indian Recipe',
                 'brandOwner': '',
                 'servingSize': recipe.get('serving_size_g', 100),
-                'servingUnit': recipe.get('serving_unit', 'serving')
+                'servingUnit': recipe.get('serving_unit', 'serving'),
+                'score': score
             })
-            
-            if len(results) >= max_results:
-                break
+            seen_ids.add(food_id)
     
-    return results
+    # Sort by score descending
+    all_scored_results.sort(key=lambda x: x['score'], reverse=True)
+    
+    return all_scored_results[:max_results]
 
 
 def get_indb_nutrients(food_code, weight_grams=100):
